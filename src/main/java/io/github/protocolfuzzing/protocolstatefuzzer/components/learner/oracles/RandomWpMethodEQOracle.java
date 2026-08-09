@@ -16,6 +16,7 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Implements an equivalence test by applying the WP-method test on the given
@@ -137,33 +138,45 @@ public class RandomWpMethodEQOracle<I, O> implements EquivalenceOracle.MealyEqui
         AtomicInteger globalCounter = new AtomicInteger(0);
         Object lockObject = new Object();
         ConcurrentMap<Integer, DefaultQuery<I, Word<O>>> counterExamples = new ConcurrentHashMap<>();
+        AtomicReference<Throwable> workerFailure = new AtomicReference<>();
 
         List<Thread> threads = new ArrayList<>();
 
         for (MealyMembershipOracle<I, O> oracle: sulOracles) {
             Thread thread = new Thread(() -> {
-                while (globalCounter.get() < bound) {
-                    DefaultQuery<I, Word<O>> query;
-                    int ticket;
-                    synchronized (lockObject) {
-                        ticket = globalCounter.getAndIncrement();
-                        if (ticket >= bound) {
-                            break;
-                        }
-                        WordBuilder<I> wb = new WordBuilder<>(minimalSize + rndLength + 1);
-                        wb.append(generator.getRandomAccessSequence(
-                            states.get(rand.nextInt(states.size())), rand));
-                        wb.append(generator.getRandomMiddleSequence(minimalSize, rndLength, rand));
-                        wb.append(generator.getRandomCharacterizingSequence(wb, rand));
+                try {
+                    while (globalCounter.get() < bound) {
+                        DefaultQuery<I, Word<O>> query;
+                        int ticket;
+                        synchronized (lockObject) {
+                            ticket = globalCounter.getAndIncrement();
+                            if (ticket >= bound) {
+                                break;
+                            }
+                            WordBuilder<I> wb = new WordBuilder<>(minimalSize + rndLength + 1);
+                            wb.append(generator.getRandomAccessSequence(
+                                states.get(rand.nextInt(states.size())), rand));
+                            wb.append(generator.getRandomMiddleSequence(minimalSize, rndLength, rand));
+                            wb.append(generator.getRandomCharacterizingSequence(wb, rand));
 
-                        query = new DefaultQuery<>(wb.toWord());
+                            query = new DefaultQuery<>(wb.toWord());
+                        }
+                        oracle.processQueries(Collections.singleton(query));
+                        Word<O> hypOutput = hypothesis.computeOutput(query.getInput());
+                        if (!Objects.equals(hypOutput, query.getOutput())) {
+                            counterExamples.put(ticket, query);
+                            globalCounter.set(bound);
+                        }
                     }
-                    oracle.processQueries(Collections.singleton(query));
-                    Word<O> hypOutput = hypothesis.computeOutput(query.getInput());
-                    if (!Objects.equals(hypOutput, query.getOutput())) {
-                        counterExamples.put(ticket, query);
-                        globalCounter.set(bound);
-                    }
+                }
+                catch (RuntimeException | Error e) {
+                    // Record the failure so the joining thread can rethrow it, and stop
+                    // the other workers: the search has not completed, so its result may
+                    // no longer be trusted. Rethrown so the JVM still reports the dying
+                    // thread the way it always has.
+                    workerFailure.compareAndSet(null, e);
+                    globalCounter.set(bound);
+                    throw e;
                 }
             });
             threads.add(thread);
@@ -179,6 +192,41 @@ public class RandomWpMethodEQOracle<I, O> implements EquivalenceOracle.MealyEqui
             }
         }
 
+        // A worker that throws dies, join() returns normally, and counterExamples is
+        // empty — so without this the method would return null, which the learner
+        // reads as "the hypothesis is equivalent". An aborted search would then be
+        // indistinguishable from a completed one, silently ending learning with an
+        // unverified hypothesis. This matters most for the exception the oracle stack
+        // raises on purpose: CESanitizingSULOracle rethrows a non-deterministic query
+        // when skipNonDetTests is false, which is a deliberate hard stop and is one
+        // when the search runs on the calling thread.
+        Throwable failure = workerFailure.get();
+        if (failure != null) {
+            throw new EquivalenceOracleFailedException(
+                "Equivalence search aborted: a worker thread failed with "
+                    + failure.getClass().getName() + ": " + failure.getMessage(),
+                failure);
+        }
+
         return counterExamples.isEmpty() ? null : counterExamples.get(Collections.min(counterExamples.keySet()));
+    }
+
+    /**
+     * Thrown when a worker thread of the parallel equivalence search fails, so that an
+     * aborted search is never reported as a completed one that found no counterexample.
+     */
+    public static class EquivalenceOracleFailedException extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        /**
+         * Constructs a new instance from the given parameters.
+         *
+         * @param message the detail message
+         * @param cause   the failure of the worker thread
+         */
+        public EquivalenceOracleFailedException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }
