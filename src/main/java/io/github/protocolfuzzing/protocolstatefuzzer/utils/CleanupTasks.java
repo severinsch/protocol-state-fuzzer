@@ -1,10 +1,13 @@
 package io.github.protocolfuzzing.protocolstatefuzzer.utils;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Collection of tasks which are executed on termination, an alternative to shutdown hook.
+ * <p>
+ * Thread-safe: SULs running under parallel oracles share one instance and may call
+ * {@link #submit(Runnable)} concurrently.
  */
 public class CleanupTasks {
 
@@ -15,7 +18,7 @@ public class CleanupTasks {
      * Constructs a new instance with an empty {@link #tasks} list.
      */
     public CleanupTasks() {
-        tasks = new ArrayList<>();
+        tasks = new CopyOnWriteArrayList<>();
     }
 
     /**
