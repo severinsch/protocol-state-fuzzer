@@ -256,6 +256,11 @@ public class WpEQSequenceGenerator<I, D, S> {
 
     /**
      * Returns a random access sequence of the given state.
+     * <p>
+     * A randomized depth-first search backwards from {@code toState}. {@code visited} is
+     * never cleared on backtracking, so each state is expanded at most once and the search
+     * is O(states + transitions); the returned path is still simple because
+     * {@code sequence} is popped on backtracking.
      *
      * @param  automaton the automaton to be used
      * @param  inputs    the inputs of the automaton
@@ -298,7 +303,7 @@ public class WpEQSequenceGenerator<I, D, S> {
                         return result;
                     }
 
-                    visited.remove(predStruct.getState());
+                    // predStruct.getState() stays in visited, see above.
                     sequence.remove(0);
                 }
             }
