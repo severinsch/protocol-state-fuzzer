@@ -248,7 +248,8 @@ public class WpEQSequenceGenerator<I, D, S> {
             new ArrayList<>());
 
         if (accessSequence == null) {
-            throw new IllegalStateException("Access sequence could not be generated");
+            throw new IllegalStateException(
+                "Access sequence could not be generated: the state is not reachable from the initial state");
         }
 
         return accessSequence;
@@ -256,6 +257,28 @@ public class WpEQSequenceGenerator<I, D, S> {
 
     /**
      * Returns a random access sequence of the given state.
+     * <p>
+     * The search is a randomized depth-first search backwards over {@link #predMap},
+     * from {@code toState} towards the initial state; the first time it steps into the
+     * initial state, {@code sequence} holds a forward path from the initial state to
+     * {@code toState} and that path is the access sequence.
+     * <p>
+     * {@code visited} is a <em>search-wide</em> mark and is deliberately never cleared
+     * on backtracking, so every state is expanded at most once and the whole search is
+     * O(states + transitions). Clearing it on backtracking — as this method used to do —
+     * turns the search into an enumeration of all <em>simple</em> paths, which is
+     * exponential: a 13-state, 13-input automaton whose only edge out of the initial
+     * state enters a densely connected component already needs millions of expansions,
+     * and slightly larger ones do not terminate in practice. Because the generation runs
+     * under the ticket lock of {@link RandomWpMethodEQOracle}, such a search does not
+     * merely slow one query down, it parks every worker of the equivalence round with no
+     * exception and no progress.
+     * <p>
+     * The search-wide mark costs nothing in reachability terms: a depth-first search
+     * that marks states once still reaches every state that is backwards-reachable from
+     * {@code toState}, and the initial state is backwards-reachable from every state of
+     * a hypothesis. It also keeps the returned path simple, because {@code sequence} is
+     * still popped on backtracking, so the path is the current search stack.
      *
      * @param  automaton the automaton to be used
      * @param  inputs    the inputs of the automaton
@@ -298,7 +321,7 @@ public class WpEQSequenceGenerator<I, D, S> {
                         return result;
                     }
 
-                    visited.remove(predStruct.getState());
+                    // NOTE: predStruct.getState() stays in visited on purpose, see above.
                     sequence.remove(0);
                 }
             }

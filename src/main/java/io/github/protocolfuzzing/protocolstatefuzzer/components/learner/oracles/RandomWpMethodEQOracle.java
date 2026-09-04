@@ -148,6 +148,13 @@ public class RandomWpMethodEQOracle<I, O> implements EquivalenceOracle.MealyEqui
                     while (globalCounter.get() < bound) {
                         DefaultQuery<I, Word<O>> query;
                         int ticket;
+                        // The whole word is built under the lock so that the ticket order
+                        // and the draws taken from the single seeded rand stay in lockstep:
+                        // that is what makes a run with a given seed reproducible whatever
+                        // the number of workers. The price is that a slow generation parks
+                        // every worker, so the generator must stay cheap — see the note on
+                        // WpEQSequenceGenerator#getRandomAccessSequence about the search
+                        // that used to be exponential and stalled entire rounds here.
                         synchronized (lockObject) {
                             ticket = globalCounter.getAndIncrement();
                             if (ticket >= bound) {
