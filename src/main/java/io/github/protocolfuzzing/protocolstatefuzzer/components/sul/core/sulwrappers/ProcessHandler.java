@@ -128,7 +128,17 @@ public class ProcessHandler {
         }
 
         try {
-            currentProcess = pb.start();
+            // Only the spawn itself, never the startWait sleep below: the fork copies this
+            // JVM's descriptor table into the child, so a SUL closing a socket at this
+            // instant does not get its port back until the child has closed the copy.
+            // See ForkSocketGuard.
+            ForkSocketGuard.forkLock().lock();
+            try {
+                currentProcess = pb.start();
+            }
+            finally {
+                ForkSocketGuard.forkLock().unlock();
+            }
             hasLaunched = true;
 
             pipe(currentProcess.getInputStream(), output);
