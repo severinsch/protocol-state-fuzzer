@@ -184,8 +184,11 @@ public class ProcessHandler {
             LOGGER.error("Interrupted while waiting for process to terminate: ", e.getMessage());
             throw new RuntimeException(e);
         }
-
-        currentProcess = null;
+        finally {
+            // Termination was requested above, so the handle is released on every path;
+            // otherwise launchProcess() would refuse to launch again after one failure.
+            currentProcess = null;
+        }
     }
 
     /**
