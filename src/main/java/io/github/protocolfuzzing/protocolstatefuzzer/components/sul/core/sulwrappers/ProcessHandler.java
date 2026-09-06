@@ -184,8 +184,23 @@ public class ProcessHandler {
             LOGGER.error("Interrupted while waiting for process to terminate: ", e.getMessage());
             throw new RuntimeException(e);
         }
-
-        currentProcess = null;
+        finally {
+            // Release the handle on EVERY exit path, including the two that throw.
+            //
+            // Termination has already been requested unconditionally above (destroyForcibly,
+            // or terminateCommand), so once this method leaves, the handler is no longer the
+            // owner of a usable process whatever happened next. Leaving currentProcess set on
+            // the throwing paths broke that: launchProcess() returns early with a warning when
+            // currentProcess is non-null, so a single slow termination — or an interrupt during
+            // one — silently converted the handler into one that never launches a process
+            // again. Every subsequent test then ran against no SUL at all, which is
+            // indistinguishable from a SUL that answers nothing.
+            //
+            // The exception is still thrown: a process that outlives its forced termination is
+            // a real alarm and callers must see it. What the reset changes is only that the
+            // alarm is not compounded by a permanently wedged handler.
+            currentProcess = null;
+        }
     }
 
     /**
