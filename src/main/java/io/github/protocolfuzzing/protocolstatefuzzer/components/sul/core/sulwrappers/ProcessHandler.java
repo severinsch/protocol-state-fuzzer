@@ -128,7 +128,13 @@ public class ProcessHandler {
         }
 
         try {
-            currentProcess = pb.start();
+            ForkSocketGuard.forkLock().lock();
+            try {
+                currentProcess = pb.start();
+            }
+            finally {
+                ForkSocketGuard.forkLock().unlock();
+            }
             hasLaunched = true;
 
             pipe(currentProcess.getInputStream(), output);
